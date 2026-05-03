@@ -1,0 +1,7 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pandas==2.2.3
+akshare==1.16.98
+lxml==5.3.0
+beautifulsoup4==4.12.3

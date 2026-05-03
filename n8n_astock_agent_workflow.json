@@ -1,0 +1,351 @@
+{
+  "name": "A股港股智能投研Agent - DingTalk + Doubao + n8n + Research API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ding-astock-agent",
+        "responseMode": "onReceived",
+        "options": {
+          "responseCode": 200,
+          "responseData": "success"
+        }
+      },
+      "id": "5b4cb5e0-e02b-43b0-b166-454accbd75a8",
+      "name": "DingTalk Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        0
+      ],
+      "webhookId": "ding-astock-agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nfunction getEnv(name, fallback = '') {\n  try {\n    if (typeof $env !== 'undefined' && $env && $env[name]) return $env[name];\n  } catch (e) {}\n  try {\n    if (typeof process !== 'undefined' && process.env && process.env[name]) return process.env[name];\n  } catch (e) {}\n  return fallback;\n}\n\nconst input = $input.first().json;\nconst body = input.body || input;\nconst headers = input.headers || {};\n\nfunction clean(s) {\n  return String(s || '').replace(/\\s+/g, ' ').trim();\n}\n\nlet userMessage = '';\nif (body.text && typeof body.text === 'object' && body.text.content) userMessage = body.text.content;\nelse if (body.text && typeof body.text === 'string') userMessage = body.text;\nelse if (body.content) userMessage = body.content;\nelse if (body.msg) userMessage = body.msg;\nelse if (body.message) userMessage = body.message;\nelse if (body.prompt) userMessage = body.prompt;\nelse userMessage = JSON.stringify(body).slice(0, 2000);\n\n// 去掉 @机器人 的噪声\nuserMessage = clean(userMessage.replace(/@[^\\s]+/g, ''));\n\nconst requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;\nconst sessionWebhook = body.sessionWebhook || body.sessionWebhookUrl || '';\nconst fallbackWebhook = getEnv('DINGTALK_WEBHOOK_URL', '');\nconst replyWebhook = sessionWebhook || fallbackWebhook;\n\nreturn [{\n  json: {\n    request_id: requestId,\n    user_message: userMessage,\n    sender_nick: body.senderNick || body.senderStaffId || body.senderId || '',\n    conversation_id: body.conversationId || '',\n    session_webhook: sessionWebhook,\n    reply_webhook: replyWebhook,\n    raw_body: body,\n    raw_headers: headers,\n    config: {\n      ark_base_url: getEnv('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com'),\n      ark_api_key: getEnv('ARK_API_KEY', ''),\n      doubao_model: getEnv('DOUBAO_MODEL', 'doubao-seed-2-0-pro-260215'),\n      research_api_base: getEnv('RESEARCH_API_BASE', ''),\n      enable_doubao_web_search: getEnv('ENABLE_DOUBAO_WEB_SEARCH', 'true') !== 'false'\n    }\n  }\n}];\n"
+      },
+      "id": "6f42dfea-7eff-4a0f-bb55-aee4a53b8448",
+      "name": "Normalize DingTalk Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.reply_webhook}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ msgtype: 'text', text: { content: '收到，已进入A股/港股投研分析流程。这个过程会抓取财联社、政策、公告、行情、搜索结果，稍等我推送完整报告。' } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "9ef6d1bd-9ba7-4ffa-85a9-b427f8be966c",
+      "name": "DingTalk Ack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -540,
+        -140
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.ark_base_url + '/api/v3/responses'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.config.ark_api_key}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: $json.config.doubao_model,\n  stream: false,\n  input: [\n    {\n      role: 'system',\n      content: [{\n        type: 'input_text',\n        text: `你是A股/港股投研Agent的“意图解析器”。只输出JSON，不要输出Markdown。\n任务：从用户消息中提取主题、关键词、产业链环节、需要抓取的数据源、是否涉及A股/港股/政策/公司公告/实时行情。\n要求：\n1. keywords 给出 5-12 个短关键词。\n2. industry_chain 按上游/中游/下游/应用端或技术环节输出。\n3. data_need 只能从 policy, cls_news, exchange_announcement, eastmoney, akshare_market, akshare_concept, ai_search, web_search 中选择。\n4. 不要编造股票代码。`\n      }]\n    },\n    {\n      role: 'user',\n      content: [{ type: 'input_text', text: $json.user_message }]\n    }\n  ]\n}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "ab872da1-c726-4cf8-aaa5-42d1298bf438",
+      "name": "Doubao Intent Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -540,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst original = $node['Normalize DingTalk Input'].json;\nconst res = $input.first().json;\n\nfunction extractText(obj) {\n  if (!obj) return '';\n  if (typeof obj.output_text === 'string') return obj.output_text;\n  if (Array.isArray(obj.output)) {\n    let parts = [];\n    for (const o of obj.output) {\n      if (Array.isArray(o.content)) {\n        for (const c of o.content) {\n          if (typeof c.text === 'string') parts.push(c.text);\n          if (typeof c.output_text === 'string') parts.push(c.output_text);\n        }\n      }\n      if (typeof o.text === 'string') parts.push(o.text);\n    }\n    if (parts.length) return parts.join('\\n');\n  }\n  if (obj.choices?.[0]?.message?.content) return obj.choices[0].message.content;\n  return JSON.stringify(obj);\n}\n\nfunction parseJsonLoose(text) {\n  let t = String(text || '').trim();\n  t = t.replace(/^```json\\s*/i, '').replace(/^```\\s*/i, '').replace(/```$/i, '').trim();\n  try { return JSON.parse(t); } catch (e) {}\n  const m = t.match(/\\{[\\s\\S]*\\}/);\n  if (m) {\n    try { return JSON.parse(m[0]); } catch (e) {}\n  }\n  return {\n    keywords: original.user_message.match(/[\\u4e00-\\u9fa5A-Za-z0-9]{2,12}/g)?.slice(0, 10) || [],\n    industry_chain: [],\n    data_need: ['policy','cls_news','exchange_announcement','eastmoney','akshare_market','akshare_concept','ai_search','web_search'],\n    parse_warning: 'intent_json_parse_failed',\n    raw_text: text.slice(0, 2000)\n  };\n}\n\nconst intentText = extractText(res);\nconst intent = parseJsonLoose(intentText);\nreturn [{ json: { ...original, intent, intent_raw: intentText } }];\n"
+      },
+      "id": "a00c6336-3649-4977-b623-7e5c127f5cdb",
+      "name": "Parse Intent JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.research_api_base.replace(/\\/$/, '') + '/research'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  request_id: $json.request_id,\n  user_message: $json.user_message,\n  intent: $json.intent,\n  max_items: 80,\n  top_k: 40,\n  enable_tavily: true,\n  enable_serper: true,\n  enable_exa: true,\n  enable_akshare: true\n}) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "5d574cc0-cc99-4153-b41b-902984357a0f",
+      "name": "Research API - RSSHub Search AkShare",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst original = $node['Parse Intent JSON'].json;\nconst research = $input.first().json;\nreturn [{ json: { ...original, research } }];\n"
+      },
+      "id": "599a14c5-9b9f-4499-86c7-08e93ae6901a",
+      "name": "Merge Research Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.config.ark_base_url + '/api/v3/responses'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.config.ark_api_key}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: $json.config.doubao_model,\n  stream: false,\n  tools: $json.config.enable_doubao_web_search ? [{ type: 'web_search', max_keyword: 4, limit: 10 }] : [],\n  input: [\n    {\n      role: 'system',\n      content: [{\n        type: 'input_text',\n        text: `你是一名资深A股/港股产业链投研分析师，同时也是严谨的事实审稿人。\n你的目标：根据用户消息，结合n8n提供的专业数据，生成“研究候选池报告”。\n\n【最高规则：证据优先级】\nS级：n8n提供的专业数据，包括政策文件、交易所公告、公司公告、财联社、AkShare行情/概念/财务数据。\nA级：n8n提供的东方财富、权威财经媒体等公开财经源。\nB级：Tavily/Serper/Exa/豆包web_search等联网公开网页补充。\nC级：你的历史知识，只能作为背景。\n当S/A级数据与web_search冲突时，必须以n8n数据为准，并在“信息冲突与待验证”中说明。\n\n【禁止事项】\n1. 禁止编造股票代码、财务数据、市占率、客户、订单、供应链关系。\n2. 禁止输出“保证上涨、买入、卖出、目标价”。\n3. 如果数据不足，必须写“待验证”，不要强行下结论。\n4. 不要把普通网页传闻当成确定事实。\n\n【输出要求】\n必须用中文Markdown输出，结构如下：\n# A股/港股智能投研候选池报告\n## 1. 核心结论\n## 2. 事件/政策/消息解读\n## 3. 产业链拆解\n## 4. 候选股票池表格\n表格列：公司名称 | 股票代码 | 市场 | 所属环节 | 核心逻辑 | 证据等级 | 可信度评分(1-5) | 主要风险\n## 5. 重点公司深挖\n## 6. 信息冲突与待验证\n表格列：信息点 | n8n专业数据 | web_search/网页补充 | 是否冲突 | 处理方式\n## 7. 风险提示\n## 8. 后续跟踪清单\n\n候选池必须优先选择：产业链关键环节、卡脖子技术、国产替代、高市占率、核心材料/设备/零部件/软件/工艺公司。`\n      }]\n    },\n    {\n      role: 'user',\n      content: [{\n        type: 'input_text',\n        text: `用户原始问题：\\n${$json.user_message}\\n\\n【第一轮意图解析】\\n${JSON.stringify($json.intent, null, 2)}\\n\\n【n8n专业数据，最高优先级】\\n${JSON.stringify($json.research.compact_context || $json.research.structured_context || $json.research, null, 2)}\\n\\n请必要时使用web_search补充，但最终判断必须服从证据优先级。`\n      }]\n    }\n  ]\n}) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "9b3326a8-7db1-413e-a3fe-a341d6557f25",
+      "name": "Doubao Final Report with Web Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        340,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst res = $input.first().json;\nconst original = $node['Merge Research Context'].json;\n\nfunction extractText(obj) {\n  if (!obj) return '';\n  if (typeof obj.output_text === 'string') return obj.output_text;\n  if (Array.isArray(obj.output)) {\n    let parts = [];\n    for (const o of obj.output) {\n      if (Array.isArray(o.content)) {\n        for (const c of o.content) {\n          if (typeof c.text === 'string') parts.push(c.text);\n          if (typeof c.output_text === 'string') parts.push(c.output_text);\n        }\n      }\n      if (typeof o.text === 'string') parts.push(o.text);\n    }\n    if (parts.length) return parts.join('\\n');\n  }\n  if (obj.choices?.[0]?.message?.content) return obj.choices[0].message.content;\n  return JSON.stringify(obj, null, 2);\n}\n\nlet report = extractText(res).trim();\nif (!report) report = '分析失败：模型没有返回有效文本。请检查ARK_API_KEY、模型ID、Responses API权限和Research API。';\n\n// 钉钉Markdown消息长度别太夸张。超过时自动截断，完整结果仍可在n8n执行记录里看。\nconst maxLen = 14500;\nlet shown = report;\nif (shown.length > maxLen) {\n  shown = shown.slice(0, maxLen) + '\\n\\n---\\n内容较长，已截断。完整报告请在 n8n 执行记录查看。';\n}\n\nconst title = 'A股/港股智能投研报告';\nconst webhook = original.reply_webhook;\nreturn [{\n  json: {\n    request_id: original.request_id,\n    reply_webhook: webhook,\n    report,\n    dingtalk_body: {\n      msgtype: 'markdown',\n      markdown: {\n        title,\n        text: shown\n      }\n    }\n  }\n}];\n"
+      },
+      "id": "f3b55fa8-6ee9-4776-849d-2ac528936eab",
+      "name": "Format DingTalk Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.reply_webhook}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.dingtalk_body) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "5693af9e-7738-4cb2-b39f-1ef9b5709dbf",
+      "name": "Send DingTalk Final Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "DingTalk Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize DingTalk Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize DingTalk Input": {
+      "main": [
+        [
+          {
+            "node": "DingTalk Ack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Doubao Intent Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doubao Intent Extract": {
+      "main": [
+        [
+          {
+            "node": "Parse Intent JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Intent JSON": {
+      "main": [
+        [
+          {
+            "node": "Research API - RSSHub Search AkShare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research API - RSSHub Search AkShare": {
+      "main": [
+        [
+          {
+            "node": "Merge Research Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Research Context": {
+      "main": [
+        [
+          {
+            "node": "Doubao Final Report with Web Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doubao Final Report with Web Search": {
+      "main": [
+        [
+          {
+            "node": "Format DingTalk Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format DingTalk Markdown": {
+      "main": [
+        [
+          {
+            "node": "Send DingTalk Final Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-05-03T00:00:00.000Z",
+  "versionId": "66983560-879c-4380-a79f-45268d52593b"
+}

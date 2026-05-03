@@ -1,0 +1,15 @@
+services:
+  astock-research-api:
+    build: .
+    container_name: astock-research-api
+    restart: always
+    ports:
+      - "7860:7860"
+    environment:
+      RSSHUB_BASE: "https://rsshub.app"
+      TAVILY_API_KEY: ""
+      SERPER_API_KEY: ""
+      EXA_API_KEY: ""
+      CACHE_TTL_SECONDS: "180"
+      HTTP_TIMEOUT: "12"
+      LOG_LEVEL: "INFO"
