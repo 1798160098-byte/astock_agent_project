@@ -16,14 +16,33 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check HF_TOKEN
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN is empty. Please add it in GitHub Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "HF_TOKEN exists."
+
       - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
 
-          git remote remove hf 2>/dev/null || true
-          git remote add hf https://1798160098-byte:${HF_TOKEN}@huggingface.co/spaces/1798160098-byte/astock-research-api
+          git clone https://1798160098-byte:${HF_TOKEN}@huggingface.co/spaces/1798160098-byte/astock-research-api hf-space
 
-          git push hf main --force
+          rsync -av --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude "__pycache__" \
+            --exclude ".env" \
+            ./ hf-space/
+
+          cd hf-space
+          git add .
+          git commit -m "Sync from GitHub" || echo "No changes to commit"
+          git push
