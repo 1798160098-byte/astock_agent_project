@@ -1,3 +1,13 @@
+---
+title: AStock Research API
+emoji: 📈
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
 # A股/港股智能投研 Agent：n8n + 豆包 + RSSHub + AkShare + AI Search
 
 ## 1. 文件说明
